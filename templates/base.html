@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turo Toll Reconciliation</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <nav class="container-fluid">
+    <ul>
+      <li><strong>Turo Toll Reconcile</strong></li>
+    </ul>
+    <ul>
+      {% if current_user.is_authenticated %}
+        <li><a href="{{ url_for('dashboard') }}">Dashboard</a></li>
+        {% if current_user.role == 'admin' %}
+          <li><a href="{{ url_for('admin') }}">Admin</a></li>
+        {% endif %}
+        <li><a href="{{ url_for('logout') }}" class="contrast">Logout</a></li>
+      {% else %}
+        <li><a href="{{ url_for('login') }}">Login</a></li>
+        <li><a href="{{ url_for('signup') }}" class="contrast">Sign up</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack">
+          {% for category, message in messages %}
+            <article class="flash flash-{{ category }}">{{ message }}</article>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <dialog id="confirmDialog">
+    <article>
+      <h3>Confirm export</h3>
+      <p>Use 1 credit to generate this export?</p>
+      <footer>
+        <button class="secondary" id="confirmCancel" type="button">Cancel</button>
+        <button id="confirmOk" type="button">Confirm</button>
+      </footer>
+    </article>
+  </dialog>
+
+  <div class="status-toast" id="statusToast" aria-live="polite"></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

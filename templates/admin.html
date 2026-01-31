@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<section class="admin-header">
+  <div>
+    <h2>Admin control center</h2>
+    <p>Manage subscriber accounts, plans, and credits for fleet tiers.</p>
+  </div>
+</section>
+
+<section class="grid">
+  <article>
+    <h3>Create user</h3>
+    <form method="post">
+      <label>Email
+        <input type="email" name="email" required>
+      </label>
+      <label>Password
+        <input type="password" name="password" required>
+      </label>
+      <label>Role
+        <select name="role">
+          <option value="subscriber">Subscriber</option>
+          <option value="admin">Admin</option>
+        </select>
+      </label>
+      <label>Plan
+        <select name="plan">
+          <option>Colorado Starter</option>
+          <option>Front Range Pro</option>
+          <option>Nationwide Growth</option>
+        </select>
+      </label>
+      <label>Fleet size
+        <input type="number" name="fleet_size" min="1" value="1">
+      </label>
+      <label>Credits
+        <input type="number" name="credits" min="0" value="10">
+      </label>
+      <button type="submit" class="contrast">Create user</button>
+    </form>
+  </article>
+  <article>
+    <h3>Subscribers</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Plan</th>
+            <th>Fleet size</th>
+            <th>Credits</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+            <tr>
+              <td>{{ user.email }}</td>
+              <td>{{ user.role }}</td>
+              <td>{{ user.plan }}</td>
+              <td>{{ user.fleet_size }}</td>
+              <td>{{ user.credits }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
+{% endblock %}

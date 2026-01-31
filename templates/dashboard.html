@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<section class="dashboard-header">
+  <div>
+    <h2>Subscriber dashboard</h2>
+    <p>Colorado-first TollGuru reconciliation for E-470 and ExpressToll trips.</p>
+  </div>
+  <div class="balance-card">
+    <p class="label">Credits</p>
+    <h3>{{ current_user.credits }}</h3>
+    <p class="muted">Plan: {{ current_user.plan }} · Fleet size: {{ current_user.fleet_size }}</p>
+    <form method="post" action="{{ url_for('buy_credits') }}" class="inline-form">
+      <input type="hidden" name="credits" value="5">
+      <button type="submit" class="secondary">Buy 5 credits</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid">
+  <article>
+    <h3>Ingest forwarded emails</h3>
+    <form method="post" action="{{ url_for('ingest_email') }}">
+      <label>Paste one or many email bodies (separate with -----)
+        <textarea name="email_body" rows="6" placeholder="Booking ID: 12345\nGuest: Alex Doe\nPlate: CO1234\nStart: 2024-01-01T10:00:00\nEnd: 2024-01-05T18:00:00"></textarea>
+      </label>
+      <button type="submit" class="contrast">Ingest emails</button>
+    </form>
+  </article>
+  <article>
+    <h3>Sync TollGuru data</h3>
+    <p>Queue a post-trip sync for Colorado tolls (E-470 / ExpressToll).</p>
+    <form method="post" action="{{ url_for('sync_tolls') }}">
+      <label>Plate to sync
+        <input type="text" name="plate" placeholder="CO1234">
+      </label>
+      <button type="submit" class="secondary">Sync tolls</button>
+    </form>
+  </article>
+</section>
+
+<section class="filters">
+  <h3>Batch filter</h3>
+  <form method="get" class="filter-form">
+    <label>Start date
+      <input type="date" name="start" value="{{ request.args.get('start', '') }}">
+    </label>
+    <label>End date
+      <input type="date" name="end" value="{{ request.args.get('end', '') }}">
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+</section>
+
+<section>
+  <div class="export-bar">
+    <h3>Reservation + Toll matching</h3>
+    <div class="export-actions">
+      <a href="{{ url_for('export_csv') }}" class="contrast export-link" data-confirm="true">Export CSV</a>
+      <a href="{{ url_for('export_pdf') }}" class="secondary export-link" data-confirm="true">Export PDF invoice</a>
+      <button class="secondary" type="button" disabled>Export to Google Sheets (coming soon)</button>
+    </div>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Booking</th>
+          <th>Guest</th>
+          <th>Plate</th>
+          <th>Rental window</th>
+          <th>Matched tolls</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in matched %}
+          <tr>
+            <td>{{ item.reservation.booking_id }}</td>
+            <td>{{ item.reservation.guest_name }}</td>
+            <td>{{ item.reservation.plate }}</td>
+            <td>{{ item.reservation.start_date.strftime('%Y-%m-%d') }} → {{ item.reservation.end_date.strftime('%Y-%m-%d') }}</td>
+            <td>
+              {% if item.tolls %}
+                <ul>
+                  {% for toll in item.tolls %}
+                    <li>{{ toll.location }} · ${{ '%.2f'|format(toll.amount) }}</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <span class="muted">No tolls yet</span>
+              {% endif %}
+            </td>
+            <td>${{ '%.2f'|format(item.total) }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6" class="muted">No reservations ingested yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h3>Recent toll activity</h3>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Plate</th>
+          <th>Location</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for toll in tolls %}
+          <tr>
+            <td>{{ toll.plate }}</td>
+            <td>{{ toll.location }}</td>
+            <td>{{ toll.entry_time.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ toll.exit_time.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>${{ '%.2f'|format(toll.amount) }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="5" class="muted">No tolls synced yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

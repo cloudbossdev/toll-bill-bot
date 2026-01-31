@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<article class="form-card">
+  <h2>Create your subscriber account</h2>
+  <form method="post">
+    <label>Email
+      <input type="email" name="email" required>
+    </label>
+    <label>Password
+      <input type="password" name="password" required>
+    </label>
+    <label>Subscription plan
+      <select name="plan">
+        <option>Colorado Starter</option>
+        <option>Front Range Pro</option>
+        <option>Nationwide Growth</option>
+      </select>
+    </label>
+    <label>Fleet size
+      <input type="number" name="fleet_size" min="1" value="1">
+    </label>
+    <button type="submit" class="contrast">Sign up</button>
+  </form>
+</article>
+{% endblock %}
