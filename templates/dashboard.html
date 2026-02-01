@@ -9,7 +9,7 @@
   <div class="balance-card">
     <p class="label">Credits</p>
     <h3>{{ current_user.credits }}</h3>
-    <p class="muted">Plan: {{ current_user.plan }} · Fleet size: {{ current_user.fleet_size }}</p>
+    <p class="muted">Plan: {{ current_user.plan }} - Fleet size: {{ current_user.fleet_size }}</p>
     <form method="post" action="{{ url_for('buy_credits') }}" class="inline-form">
       <input type="hidden" name="credits" value="5">
       <button type="submit" class="secondary">Buy 5 credits</button>
@@ -79,12 +79,12 @@
             <td>{{ item.reservation.booking_id }}</td>
             <td>{{ item.reservation.guest_name }}</td>
             <td>{{ item.reservation.plate }}</td>
-            <td>{{ item.reservation.start_date.strftime('%Y-%m-%d') }} → {{ item.reservation.end_date.strftime('%Y-%m-%d') }}</td>
+            <td>{{ item.reservation.start_date.strftime('%Y-%m-%d') }} -> {{ item.reservation.end_date.strftime('%Y-%m-%d') }}</td>
             <td>
               {% if item.tolls %}
                 <ul>
                   {% for toll in item.tolls %}
-                    <li>{{ toll.location }} · ${{ '%.2f'|format(toll.amount) }}</li>
+                    <li>{{ toll.location }} - ${{ '%.2f'|format(toll.amount) }}</li>
                   {% endfor %}
                 </ul>
               {% else %}

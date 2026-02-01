@@ -1,7 +1,7 @@
 import csv
 import io
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import (Flask, flash, redirect, render_template, request, send_file,
                    url_for)
@@ -22,7 +22,7 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DB_PATH = os.path.join(BASE_DIR, "app.db")
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-key")
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -78,9 +78,11 @@ def load_user(user_id):
 
 def initialize_database():
     db.create_all()
-    if not User.query.filter_by(role="admin").first():
-        admin = User(email="admin@turotolls.com", role="admin", credits=999)
-        admin.set_password("admin")
+    admin_email = os.environ.get("ADMIN_EMAIL")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+    if admin_email and admin_password and not User.query.filter_by(role="admin").first():
+        admin = User(email=admin_email, role="admin", credits=999)
+        admin.set_password(admin_password)
         db.session.add(admin)
         db.session.commit()
 
@@ -150,8 +152,8 @@ def dashboard():
             flash("Invalid start date filter.", "error")
     if end:
         try:
-            end_date = datetime.fromisoformat(end)
-            query = query.filter(ReservationEmail.end_date <= end_date)
+            end_date = datetime.fromisoformat(end) + timedelta(days=1)
+            query = query.filter(ReservationEmail.end_date < end_date)
         except ValueError:
             flash("Invalid end date filter.", "error")
     reservations = query.order_by(ReservationEmail.start_date.desc()).all()
@@ -396,4 +398,5 @@ with app.app_context():
     initialize_database()
 
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    debug_mode = os.environ.get("FLASK_DEBUG") == "1"
+    app.run(debug=debug_mode, host="0.0.0.0", port=5000)

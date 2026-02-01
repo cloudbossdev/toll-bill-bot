@@ -18,6 +18,13 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Login with the seeded admin user:
-- **Email**: admin@turotolls.com
-- **Password**: admin
+Optional admin seed (set before first run):
+```bash
+setx ADMIN_EMAIL "admin@turotolls.com"
+setx ADMIN_PASSWORD "change-this"
+```
+
+Set a strong secret key:
+```bash
+setx SECRET_KEY "replace-with-a-long-random-string"
+```
