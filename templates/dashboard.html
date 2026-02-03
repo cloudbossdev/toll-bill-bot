@@ -11,6 +11,7 @@
     <h3>{{ current_user.credits }}</h3>
     <p class="muted">Plan: {{ current_user.plan }} - Fleet size: {{ current_user.fleet_size }}</p>
     <form method="post" action="{{ url_for('buy_credits') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="credits" value="5">
       <button type="submit" class="secondary">Buy 5 credits</button>
     </form>
@@ -21,6 +22,7 @@
   <article>
     <h3>Ingest forwarded emails</h3>
     <form method="post" action="{{ url_for('ingest_email') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Paste one or many email bodies (separate with -----)
         <textarea name="email_body" rows="6" placeholder="Booking ID: 12345\nGuest: Alex Doe\nPlate: CO1234\nStart: 2024-01-01T10:00:00\nEnd: 2024-01-05T18:00:00"></textarea>
       </label>
@@ -31,6 +33,7 @@
     <h3>Sync TollGuru data</h3>
     <p>Queue a post-trip sync for Colorado tolls (E-470 / ExpressToll).</p>
     <form method="post" action="{{ url_for('sync_tolls') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <label>Plate to sync
         <input type="text" name="plate" placeholder="CO1234">
       </label>

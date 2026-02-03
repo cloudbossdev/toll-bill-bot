@@ -4,6 +4,8 @@
 <article class="form-card">
   <h2>Create your subscriber account</h2>
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="text" name="company" autocomplete="off" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;">
     <label>Email
       <input type="email" name="email" required>
     </label>
@@ -12,14 +14,20 @@
     </label>
     <label>Subscription plan
       <select name="plan">
-        <option>Colorado Starter</option>
-        <option>Front Range Pro</option>
-        <option>Nationwide Growth</option>
+        {% for plan in plans %}
+          <option value="{{ plan.name }}">${{ plan.price }} {{ plan.name }}</option>
+        {% endfor %}
       </select>
     </label>
     <label>Fleet size
       <input type="number" name="fleet_size" min="1" value="1">
     </label>
+    {% if turnstile_site_key %}
+      <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}"></div>
+      <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    {% else %}
+      <p class="muted">Captcha is not configured. Set TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY.</p>
+    {% endif %}
     <button type="submit" class="contrast">Sign up</button>
   </form>
 </article>

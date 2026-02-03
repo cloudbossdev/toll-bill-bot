@@ -1,13 +1,24 @@
 import csv
+import hashlib
 import io
 import os
+import secrets
+import smtplib
+import time
 from datetime import datetime, timedelta
+from email.message import EmailMessage
 
+from dotenv import load_dotenv
 from flask import (Flask, flash, redirect, render_template, request, send_file,
-                   url_for)
+                   session, url_for)
 from flask_login import (LoginManager, UserMixin, current_user, login_required,
                          login_user, logout_user)
 from flask_sqlalchemy import SQLAlchemy
+from flask_wtf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+import re
+import requests
 from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
@@ -19,17 +30,25 @@ except ImportError:  # pragma: no cover - optional dependency for pdf export
 
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 DB_PATH = os.path.join(BASE_DIR, "app.db")
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", os.urandom(32).hex())
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{DB_PATH}"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["WTF_CSRF_TIME_LIMIT"] = 3600
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+if os.environ.get("SESSION_COOKIE_SECURE") == "1":
+    app.config["SESSION_COOKIE_SECURE"] = True
 
 
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
+csrf = CSRFProtect(app)
+limiter = Limiter(get_remote_address, app=app, default_limits=["200 per day", "50 per hour"])
 
 
 class User(UserMixin, db.Model):
@@ -41,6 +60,9 @@ class User(UserMixin, db.Model):
     plan = db.Column(db.String(100), default="Colorado Starter")
     fleet_size = db.Column(db.Integer, default=1)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_verified = db.Column(db.Boolean, default=False)
+    verification_token_hash = db.Column(db.String(64))
+    verification_sent_at = db.Column(db.DateTime)
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)
@@ -60,6 +82,13 @@ class ReservationEmail(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class Plan(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    price = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class TollRecord(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     plate = db.Column(db.String(20), nullable=False)
@@ -76,15 +105,42 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 
+def ensure_user_columns():
+    if not os.path.exists(DB_PATH):
+        return
+    with db.engine.connect() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(user)").fetchall()}
+        if "is_verified" not in cols:
+            conn.exec_driver_sql("ALTER TABLE user ADD COLUMN is_verified BOOLEAN DEFAULT 0")
+        if "verification_token_hash" not in cols:
+            conn.exec_driver_sql("ALTER TABLE user ADD COLUMN verification_token_hash VARCHAR(64)")
+        if "verification_sent_at" not in cols:
+            conn.exec_driver_sql("ALTER TABLE user ADD COLUMN verification_sent_at DATETIME")
+
+
 def initialize_database():
     db.create_all()
+    ensure_user_columns()
+    if Plan.query.count() == 0:
+        db.session.add_all(
+            [
+                Plan(name="Colorado Starter", price=19),
+                Plan(name="Front Range Pro", price=49),
+                Plan(name="Nationwide Growth", price=99),
+            ]
+        )
+        db.session.commit()
     admin_email = os.environ.get("ADMIN_EMAIL")
     admin_password = os.environ.get("ADMIN_PASSWORD")
     if admin_email and admin_password and not User.query.filter_by(role="admin").first():
         admin = User(email=admin_email, role="admin", credits=999)
         admin.set_password(admin_password)
+        token, token_hash = generate_verification_token()
+        admin.verification_token_hash = token_hash
+        admin.verification_sent_at = datetime.utcnow()
         db.session.add(admin)
         db.session.commit()
+        send_verification_email(admin.email, token)
 
 
 @app.route("/")
@@ -96,26 +152,70 @@ def home():
 
 
 @app.route("/signup", methods=["GET", "POST"])
+@limiter.limit("5 per minute")
 
 def signup():
     if request.method == "POST":
+        if request.form.get("company"):
+            flash("Signup failed.", "error")
+            return redirect(url_for("signup"))
+        start_ts = session.pop("signup_ts", None)
+        now_ts = time.time()
+        if not start_ts or now_ts - start_ts < 3 or now_ts - start_ts > 3600:
+            flash("Signup failed. Please try again.", "error")
+            return redirect(url_for("signup"))
+
+        turnstile_secret = os.environ.get("TURNSTILE_SECRET_KEY")
+        turnstile_response = request.form.get("cf-turnstile-response")
+        if not turnstile_secret:
+            flash("Captcha is not configured.", "error")
+            return redirect(url_for("signup"))
+        verify = requests.post(
+            "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+            data={
+                "secret": turnstile_secret,
+                "response": turnstile_response,
+                "remoteip": request.remote_addr,
+            },
+            timeout=5,
+        )
+        if not verify.ok or not verify.json().get("success"):
+            flash("Captcha verification failed.", "error")
+            return redirect(url_for("signup"))
+
         email = request.form.get("email", "").lower().strip()
         password = request.form.get("password", "")
         plan = request.form.get("plan", "Colorado Starter")
         fleet_size = int(request.form.get("fleet_size", 1))
+        if not Plan.query.filter_by(name=plan).first():
+            plan = "Colorado Starter"
         if User.query.filter_by(email=email).first():
             flash("Email already registered.", "error")
             return redirect(url_for("signup"))
+        if not is_strong_password(password):
+            flash("Password must be at least 8 characters and include a letter and a number.", "error")
+            return redirect(url_for("signup"))
         user = User(email=email, plan=plan, fleet_size=fleet_size, credits=10)
         user.set_password(password)
+        token, token_hash = generate_verification_token()
+        user.verification_token_hash = token_hash
+        user.verification_sent_at = datetime.utcnow()
         db.session.add(user)
         db.session.commit()
-        login_user(user)
-        return redirect(url_for("dashboard"))
-    return render_template("signup.html")
+        send_verification_email(user.email, token)
+        flash("Check your email to verify your account before logging in.", "success")
+        return redirect(url_for("login"))
+    session["signup_ts"] = time.time()
+    plans = Plan.query.order_by(Plan.price.asc()).all()
+    return render_template(
+        "signup.html",
+        plans=plans,
+        turnstile_site_key=os.environ.get("TURNSTILE_SITE_KEY"),
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("10 per minute")
 
 def login():
     if request.method == "POST":
@@ -123,6 +223,14 @@ def login():
         password = request.form.get("password", "")
         user = User.query.filter_by(email=email).first()
         if user and user.check_password(password):
+            if not user.is_verified:
+                token, token_hash = generate_verification_token()
+                user.verification_token_hash = token_hash
+                user.verification_sent_at = datetime.utcnow()
+                db.session.commit()
+                send_verification_email(user.email, token)
+                flash("Please verify your email. We just sent you a new verification link.", "error")
+                return render_template("login.html")
             login_user(user)
             return redirect(url_for("dashboard"))
         flash("Invalid credentials.", "error")
@@ -311,9 +419,14 @@ def admin():
         plan = request.form.get("plan", "Colorado Starter")
         fleet_size = int(request.form.get("fleet_size", 1))
         credits = int(request.form.get("credits", 10))
+        if not Plan.query.filter_by(name=plan).first():
+            plan = "Colorado Starter"
         if User.query.filter_by(email=email).first():
             flash("Email already exists.", "error")
         else:
+            if not is_strong_password(password):
+                flash("Password must be at least 8 characters and include a letter and a number.", "error")
+                return redirect(url_for("admin"))
             user = User(
                 email=email,
                 role=role,
@@ -322,11 +435,176 @@ def admin():
                 credits=credits,
             )
             user.set_password(password)
+            token, token_hash = generate_verification_token()
+            user.verification_token_hash = token_hash
+            user.verification_sent_at = datetime.utcnow()
             db.session.add(user)
             db.session.commit()
+            send_verification_email(user.email, token)
             flash("User created.", "success")
     users = User.query.order_by(User.created_at.desc()).all()
-    return render_template("admin.html", users=users)
+    plans = Plan.query.order_by(Plan.price.asc()).all()
+    return render_template(
+        "admin.html",
+        users=users,
+        plans=plans,
+        main_class="container-fluid",
+    )
+
+
+@app.route("/admin/update/<int:user_id>", methods=["POST"])
+@login_required
+def admin_update_user(user_id):
+    if current_user.role != "admin":
+        flash("Admin access required.", "error")
+        return redirect(url_for("dashboard"))
+    user = User.query.get_or_404(user_id)
+
+    email = request.form.get("email", "").lower().strip()
+    role = request.form.get("role", "subscriber")
+    plan = request.form.get("plan", "Colorado Starter")
+    try:
+        fleet_size = int(request.form.get("fleet_size", user.fleet_size))
+        credits = int(request.form.get("credits", user.credits))
+    except ValueError:
+        flash("Fleet size and credits must be numbers.", "error")
+        return redirect(url_for("admin"))
+
+    if not email:
+        flash("Email is required.", "error")
+        return redirect(url_for("admin"))
+    email_changed = email != user.email
+    if email_changed and User.query.filter_by(email=email).first():
+        flash("Email already exists.", "error")
+        return redirect(url_for("admin"))
+
+    user.email = email
+    if not Plan.query.filter_by(name=plan).first():
+        plan = "Colorado Starter"
+    user.role = role
+    user.plan = plan
+    user.fleet_size = max(fleet_size, 1)
+    user.credits = max(credits, 0)
+    if email_changed:
+        token, token_hash = generate_verification_token()
+        user.is_verified = False
+        user.verification_token_hash = token_hash
+        user.verification_sent_at = datetime.utcnow()
+        send_verification_email(user.email, token)
+    db.session.commit()
+    flash("User updated.", "success")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/delete/<int:user_id>", methods=["POST"])
+@login_required
+def admin_delete_user(user_id):
+    if current_user.role != "admin":
+        flash("Admin access required.", "error")
+        return redirect(url_for("dashboard"))
+    if current_user.id == user_id:
+        flash("You cannot delete your own admin account.", "error")
+        return redirect(url_for("admin"))
+    user = User.query.get_or_404(user_id)
+    db.session.delete(user)
+    db.session.commit()
+    flash("User deleted.", "success")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/plan/<int:plan_id>", methods=["POST"])
+@login_required
+def admin_update_plan(plan_id):
+    if current_user.role != "admin":
+        flash("Admin access required.", "error")
+        return redirect(url_for("dashboard"))
+    plan = Plan.query.get_or_404(plan_id)
+    try:
+        price = int(request.form.get("price", plan.price))
+    except ValueError:
+        flash("Plan price must be a whole number.", "error")
+        return redirect(url_for("admin"))
+    if price < 0:
+        flash("Plan price cannot be negative.", "error")
+        return redirect(url_for("admin"))
+    plan.price = price
+    db.session.commit()
+    flash("Plan updated.", "success")
+    return redirect(url_for("admin"))
+
+
+@app.route("/verify-email")
+def verify_email():
+    token = request.args.get("token", "")
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    user = User.query.filter_by(verification_token_hash=token_hash).first()
+    if not user:
+        flash("Invalid or expired verification link.", "error")
+        return redirect(url_for("login"))
+    if user.is_verified:
+        flash("Account already verified. Please log in.", "success")
+        return redirect(url_for("login"))
+    if user.verification_sent_at and datetime.utcnow() - user.verification_sent_at > timedelta(hours=24):
+        flash("Verification link expired. Please contact support.", "error")
+        return redirect(url_for("login"))
+    user.is_verified = True
+    user.verification_token_hash = None
+    user.verification_sent_at = None
+    db.session.commit()
+    flash("Email verified. You can now log in.", "success")
+    return redirect(url_for("login"))
+
+
+def generate_verification_token():
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return token, token_hash
+
+
+def send_verification_email(to_email: str, token: str) -> None:
+    verify_url = url_for("verify_email", token=token, _external=True)
+    subject = "Verify your Turo Toll Reconcile account"
+    body = (
+        "Please verify your account by clicking the link below:\n\n"
+        f"{verify_url}\n\n"
+        "This link expires in 24 hours."
+    )
+    send_email(to_email, subject, body)
+
+
+def send_email(to_email: str, subject: str, body: str) -> None:
+    host = os.environ.get("SMTP_HOST")
+    user = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_PASSWORD")
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    use_tls = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
+    from_email = os.environ.get("SMTP_FROM", user or "no-reply@example.com")
+
+    if not host or not user or not password:
+        print(f"[DEV EMAIL] To: {to_email}\nSubject: {subject}\n\n{body}\n")
+        return
+
+    message = EmailMessage()
+    message["From"] = from_email
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(body)
+
+    with smtplib.SMTP(host, port) as server:
+        if use_tls:
+            server.starttls()
+        server.login(user, password)
+        server.send_message(message)
+
+
+def is_strong_password(password: str) -> bool:
+    if len(password) < 8:
+        return False
+    if not re.search(r"[A-Za-z]", password):
+        return False
+    if not re.search(r"\d", password):
+        return False
+    return True
 
 
 

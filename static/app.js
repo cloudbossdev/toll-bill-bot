@@ -41,3 +41,51 @@ const exportLinks = document.querySelectorAll('.export-link');
 exportLinks.forEach((link) => {
   link.addEventListener('click', handleExportClick);
 });
+
+const editButtons = document.querySelectorAll('.edit-user');
+const cancelButtons = document.querySelectorAll('.cancel-user');
+const deleteButtons = document.querySelectorAll('.delete-user');
+
+function toggleUserRow(userId, editable) {
+  const row = document.querySelector(`.edit-user[data-user-id="${userId}"]`)?.closest('tr');
+  if (!row) {
+    return;
+  }
+  const fields = row.querySelectorAll('.user-field');
+  fields.forEach((field) => {
+    field.disabled = !editable;
+  });
+  row.classList.toggle('is-editing', editable);
+  row.querySelector(`.edit-user[data-user-id="${userId}"]`)?.toggleAttribute('hidden', editable);
+  row.querySelector(`.save-user[data-user-id="${userId}"]`)?.toggleAttribute('hidden', !editable);
+  row.querySelector(`.cancel-user[data-user-id="${userId}"]`)?.toggleAttribute('hidden', !editable);
+}
+
+editButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    toggleUserRow(button.dataset.userId, true);
+  });
+});
+
+cancelButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const row = button.closest('tr');
+    if (row) {
+      row.querySelectorAll('.user-field').forEach((field) => {
+        if (field.dataset.original !== undefined) {
+          field.value = field.dataset.original;
+        }
+      });
+    }
+    toggleUserRow(button.dataset.userId, false);
+  });
+});
+
+deleteButtons.forEach((button) => {
+  button.addEventListener('click', (event) => {
+    const confirmed = window.confirm('Delete this user? This cannot be undone.');
+    if (!confirmed) {
+      event.preventDefault();
+    }
+  });
+});
