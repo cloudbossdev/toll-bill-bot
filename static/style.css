@@ -209,6 +209,78 @@ nav {
   padding: 0.18rem 0.35rem;
 }
 
+.matrix-demo {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  margin-bottom: 2rem;
+  border: 1px solid #1b4227;
+  background: #031109;
+  min-height: 550px;
+}
+
+.matrix-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.matrix-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at center, rgba(4, 24, 14, 0.25) 0%, rgba(1, 8, 4, 0.78) 75%);
+}
+
+.matrix-content {
+  position: relative;
+  z-index: 2;
+  padding: 2rem;
+}
+
+.matrix-demo .hero {
+  margin-bottom: 1rem;
+}
+
+.matrix-demo .hero h1,
+.matrix-demo .hero p,
+.matrix-demo .hero h3,
+.matrix-demo .hero li,
+.matrix-demo .matrix-control h3,
+.matrix-demo .matrix-control p,
+.matrix-demo .matrix-control label {
+  color: #cff7d6;
+}
+
+.matrix-demo .pricing-card,
+.matrix-demo .matrix-control {
+  background: rgba(3, 18, 10, 0.78);
+  border: 1px solid rgba(96, 212, 125, 0.25);
+  backdrop-filter: blur(2px);
+}
+
+.matrix-control {
+  margin-top: 1rem;
+}
+
+.matrix-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.matrix-form textarea {
+  min-height: 80px;
+  resize: vertical;
+  border-color: #2e7f48;
+  background: rgba(4, 26, 13, 0.9);
+  color: #e5ffe9;
+}
+
+.matrix-form button {
+  width: fit-content;
+}
+
 @media (max-width: 899px) {
   .admin-layout {
     grid-template-columns: 1fr;
@@ -277,6 +349,10 @@ button {
 @media (max-width: 768px) {
   .dashboard-header {
     flex-direction: column;
+  }
+
+  .matrix-content {
+    padding: 1rem;
   }
 }
 
